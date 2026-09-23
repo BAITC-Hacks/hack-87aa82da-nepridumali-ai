@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import { zodResponseFormat } from "openai/helpers/zod";
+import { z } from "zod";
 import type { SimulationResult } from "../types/index.js";
 
 export interface AiAnalysis {
@@ -11,43 +13,55 @@ export interface AiAnalysis {
   suggestedNextInvestments: string[];
 }
 
+const aiAnalysisSchema = z.object({
+  executiveSummary: z.string(),
+  keyImprovements: z.array(z.string()),
+  risks: z.array(z.string()),
+  tradeoffs: z.array(z.string()),
+  strategicRecommendations: z.array(z.string()),
+  suggestedNextInvestments: z.array(z.string())
+});
+
+const ANALYST_INSTRUCTIONS = [
+  "Ты - AI-аналитик городских решений для симулятора Аким на 5 часов.",
+  "Отвечай только на русском языке и только по переданному результату детерминированного расчета.",
+  "Не пересчитывай Score, не меняй числа, не придумывай показатели, меры, эффекты, риски или ограничения.",
+  "Инициативы из server recommendations - это отдельные кандидаты; не предлагай сочетать их без новой проверки валидатором.",
+  "Объясняй конкретные сильные стороны, оставшиеся риски и компромиссы сценария.",
+  "Если для рекомендации недостаточно фактов в JSON, верни пустой массив для этого раздела.",
+  "Не показывай ход внутренних рассуждений."
+].join(" ");
+
 export async function generateAiAnalysis(result: SimulationResult): Promise<AiAnalysis> {
   if (!process.env.OPENAI_API_KEY || !result.valid) {
     return fallbackAnalysis(result);
   }
 
   try {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 1,
+      timeout: 15_000
+    });
+    const completion = await client.beta.chat.completions.parse({
+      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
       temperature: 0.3,
-      response_format: { type: "json_object" },
+      response_format: zodResponseFormat(aiAnalysisSchema, "city_scenario_analysis"),
       messages: [
         {
           role: "system",
-          content: "You are an Urban Development Strategic Advisor. Explain only the calculated simulation result. Never calculate or modify metrics."
+          content: ANALYST_INSTRUCTIONS
         },
         {
           role: "user",
-          content: JSON.stringify({
-            requiredKeys: [
-              "executiveSummary",
-              "keyImprovements",
-              "risks",
-              "tradeoffs",
-              "strategicRecommendations",
-              "suggestedNextInvestments"
-            ],
-            simulationResult: result
-          })
+          content: `Вот единственный источник фактов для анализа:\n${JSON.stringify(result)}`
         }
       ]
     });
-    const content = completion.choices[0]?.message.content;
-    if (!content) {
+    const parsed = completion.choices[0]?.message.parsed;
+    if (!parsed) {
       return fallbackAnalysis(result);
     }
-    const parsed = JSON.parse(content) as Omit<AiAnalysis, "source">;
     return {
       source: "openai",
       ...parsed
@@ -77,6 +91,6 @@ function fallbackAnalysis(result: SimulationResult): AiAnalysis {
     risks: [`Критических показателей после сценария: ${result.analysisData.criticalIssueCount}.`],
     tradeoffs: ["Бюджетные решения улучшают выбранные направления, но не закрывают все слабые зоны города."],
     strategicRecommendations: result.recommendations.map((recommendation) => recommendation.title),
-    suggestedNextInvestments: result.recommendations.flatMap((recommendation) => recommendation.initiativeIds)
+    suggestedNextInvestments: [...new Set(result.recommendations.flatMap((recommendation) => recommendation.initiativeIds))]
   };
 }

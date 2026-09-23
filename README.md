@@ -25,7 +25,7 @@ The backend separates routes from business logic:
 ## Setup
 
 ```bash
-npm install
+npm run setup
 npm run dev
 ```
 
@@ -38,6 +38,7 @@ Backend:
 
 ```bash
 OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4o-mini
 PORT=4000
 FRONTEND_ORIGIN=http://localhost:5173
 ```
@@ -55,6 +56,10 @@ npm run dev
 npm run test
 npm run build
 ```
+
+The root package starts both apps. `backend/` and `frontend/` each have their
+own committed lockfile, so dependency installation stays reproducible without
+depending on npm workspace resolution.
 
 ## API Documentation
 
@@ -78,7 +83,12 @@ Response includes validation errors, score before, score after, delta, district 
 
 ### POST `/analysis`
 
-Request body is the successful `/simulate` response. The AI explains strengths, weaknesses, tradeoffs, risks, strategic recommendations, and suggested next investments without recalculating metrics.
+Request body uses the same action list as `/simulate`. The backend recalculates the
+scenario before sending its result to the AI, so a browser cannot provide altered
+scores or indicators. The AI explains strengths, weaknesses, tradeoffs, risks,
+strategic recommendations, and suggested next investments without recalculating
+metrics. If the API key is unavailable or a structured AI response cannot be
+validated, the frontend continues to show the deterministic server analysis.
 
 ## Deployment
 

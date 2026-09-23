@@ -1,365 +1,939 @@
-import { useMemo, useState } from "react";
-import districtsData from "../../data/districts.json";
-import initiativesData from "../../data/initiatives.json";
-import { analyze, simulate } from "./lib/api.js";
-import { categoryLabels, formatEffect, metricLabels } from "./lib/format.js";
-import { Charts } from "./components/Charts.js";
-import { DistrictCard } from "./components/DistrictCard.js";
-import { InitiativeCard } from "./components/InitiativeCard.js";
-import { KpiCard } from "./components/KpiCard.js";
-import type { ActionInput, AiAnalysis, Category, District, DistrictId, Initiative, SimulationResult } from "./types/index.js";
-import conflictsData from "../../data/conflicts.json";
+import { useEffect, useRef, useState } from "react";
+import BudgetBar from "./components/BudgetBar";
+import CategoryCard from "./components/CategoryCard";
+import ScoreCard from "./components/ScoreCard";
+import ImpactChart, { DistrictDetail } from "./components/ImpactChart";
+import AnalysisPanel from "./components/AnalysisPanel";
+import ScenarioComparison from "./components/ScenarioComparison";
+import {
+  analyticNumber,
+  analyze,
+  ApiError,
+  fallbackAnalysis,
+  simulate,
+} from "./lib/api";
+import {
+  BASELINE_SCORE,
+  categories,
+  districts,
+  formatNumber,
+  HORIZON_QUARTERS,
+  initiativeById,
+  initiatives,
+  signed,
+  spentBudget,
+  TOTAL_BUDGET,
+} from "./lib/catalog";
+import { validateActions } from "./lib/validation";
+import type {
+  Action,
+  Analysis,
+  Category,
+  DistrictId,
+  Initiative,
+  SavedScenario,
+  SimulationResult,
+} from "./types";
 
-const districts = districtsData as District[];
-const initiatives = initiativesData as Initiative[];
-const conflicts = conflictsData as Array<{ initiativeIds: [string, string]; scope: "global" | "sameDistrict"; message: string }>;
+type View = "plan" | "results" | "compare";
 
 export default function App() {
-  const [actions, setActions] = useState<ActionInput[]>([]);
+  const [actions, setActions] = useState<Action[]>([]);
+  const [districtChoices, setDistrictChoices] = useState<
+    Partial<Record<string, DistrictId | "">>
+  >({});
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<Category | "all">("all");
-  const [sort, setSort] = useState<"cost" | "category" | "lag">("category");
+  const [scope, setScope] = useState("all");
+  const [sort, setSort] = useState("catalog");
+  const [view, setView] = useState<View>("plan");
+  const [focusedDistrict, setFocusedDistrict] = useState<DistrictId>("nura");
   const [result, setResult] = useState<SimulationResult | null>(null);
-  const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
-  const [activeDistrictId, setActiveDistrictId] = useState<DistrictId>("nura");
-  const [scenarioA, setScenarioA] = useState<SimulationResult | null>(null);
-  const [scenarioB, setScenarioB] = useState<SimulationResult | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const filteredInitiatives = useMemo(() => {
-    return initiatives
-      .filter((initiative) => category === "all" || initiative.category === category)
-      .filter((initiative) => `${initiative.id} ${initiative.name}`.toLowerCase().includes(query.toLowerCase()))
-      .sort((left, right) => {
-        if (sort === "cost") return left.cost - right.cost;
-        if (sort === "lag") return left.lag - right.lag;
-        return left.category.localeCompare(right.category);
-      });
-  }, [category, query, sort]);
-
-  const usedBudget = actions.reduce((sum, action) => {
-    const initiative = initiatives.find((item) => item.id === action.initiativeId);
-    return sum + (initiative?.cost ?? 0);
-  }, 0);
-
-  const activeDistrict = result?.districtsAfter.find((district) => district.id === activeDistrictId);
-  const localErrors = useMemo(() => validateDraft(actions), [actions]);
-  const errors = result?.errors.length ? result.errors : localErrors;
-
-  function toggleInitiative(initiative: Initiative) {
-    setActions((current) => {
-      const exists = current.some((action) => action.initiativeId === initiative.id);
-      if (exists) {
-        return current.filter((action) => action.initiativeId !== initiative.id);
-      }
-      return [...current, { initiativeId: initiative.id }];
-    });
-  }
-
-  function changeDistrict(initiativeId: string, districtId: string) {
-    setActions((current) =>
-      current.map((action) =>
-        action.initiativeId === initiativeId ? { ...action, districtId: districtId as DistrictId } : action
-      )
+  const [analyzing, setAnalyzing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [scenarioA, setScenarioA] = useState<SavedScenario | null>(null);
+  const [scenarioB, setScenarioB] = useState<SavedScenario | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const generation = useRef(0);
+  const simulationController = useRef<AbortController | null>(null);
+  const analysisController = useRef<AbortController | null>(null);
+  const viewHeading = useRef<HTMLHeadingElement>(null);
+  const previousView = useRef(view);
+  const spent = spentBudget(actions);
+  const issues = validateActions(actions);
+  const valid = issues.length === 0;
+  const filtered = initiatives
+    .filter((initiative) => {
+      const searchable =
+        `${initiative.id} ${initiative.name} ${categories.find((item) => item.id === initiative.category)?.name}`.toLocaleLowerCase(
+          "ru",
+        );
+      return (
+        (category === "all" || category === initiative.category) &&
+        (scope === "all" || initiative.scope === scope) &&
+        searchable.includes(query.trim().toLocaleLowerCase("ru"))
+      );
+    })
+    .sort((left, right) =>
+      sort === "cost-asc"
+        ? left.cost - right.cost
+        : sort === "cost-desc"
+          ? right.cost - left.cost
+          : sort === "lag"
+            ? left.lag - right.lag
+            : Number(left.id.slice(1)) - Number(right.id.slice(1)),
     );
+
+  useEffect(
+    () => () => {
+      generation.current += 1;
+      simulationController.current?.abort();
+      analysisController.current?.abort();
+    },
+    [],
+  );
+  useEffect(() => {
+    if (previousView.current !== view) viewHeading.current?.focus();
+    previousView.current = view;
+  }, [view]);
+
+  function changeActions(next: Action[]) {
+    generation.current += 1;
+    simulationController.current?.abort();
+    analysisController.current?.abort();
+    simulationController.current = null;
+    analysisController.current = null;
+    setActions(next);
+    setResult(null);
+    setAnalysis(null);
+    setErrors([]);
+    setAnalysisError(null);
+    setLoading(false);
+    setAnalyzing(false);
+    setAnnouncement("");
   }
 
-  async function runScenario() {
-    setLoading(true);
-    setAnalysis(null);
+  function addAction(initiativeId: string) {
+    const initiative = initiativeById.get(initiativeId);
+    if (!initiative || selectionBlockReason(initiative)) return;
+    const districtId = districtChoices[initiativeId];
+    changeActions([
+      ...actions,
+      initiative.scope === "district"
+        ? { initiativeId, districtId: districtId as DistrictId }
+        : { initiativeId },
+    ]);
+  }
+
+  function selectionBlockReason(initiative: Initiative): string | null {
+    if (actions.some((action) => action.initiativeId === initiative.id))
+      return "Уже в сценарии";
+    if (actions.length >= 5) return "Выбрано 5 решений";
+    if (spent + initiative.cost > TOTAL_BUDGET) return "Превысит бюджет";
+    if (
+      actions.filter(
+        (action) =>
+          initiativeById.get(action.initiativeId)?.category === initiative.category,
+      ).length >= 2
+    )
+      return "Лимит категории: 2";
+
+    const districtId = districtChoices[initiative.id];
+    if (initiative.scope === "district" && !districtId)
+      return "Сначала выберите район";
+    const selectedIds = new Set(actions.map((action) => action.initiativeId));
+    if (
+      (initiative.id === "M1" && selectedIds.has("M3")) ||
+      (initiative.id === "M3" && selectedIds.has("M1"))
+    )
+      return "Конфликт с выбранной мерой";
+    if (initiative.scope === "district") {
+      const sameDistrictConflict =
+        (initiative.id === "M4" &&
+          actions.some(
+            (action) => action.initiativeId === "M7" && action.districtId === districtId,
+          )) ||
+        (initiative.id === "M7" &&
+          actions.some(
+            (action) => action.initiativeId === "M4" && action.districtId === districtId,
+          )) ||
+        (initiative.id === "M5" &&
+          actions.some(
+            (action) => action.initiativeId === "M13" && action.districtId === districtId,
+          )) ||
+        (initiative.id === "M13" &&
+          actions.some(
+            (action) => action.initiativeId === "M5" && action.districtId === districtId,
+          ));
+      if (sameDistrictConflict) return "Конфликт в этом районе";
+    }
+    return null;
+  }
+
+  async function requestAnalysis(scenario: SimulationResult, version: number) {
+    analysisController.current?.abort();
+    const controller = new AbortController();
+    analysisController.current = controller;
+    const isCurrent = () =>
+      generation.current === version &&
+      analysisController.current === controller;
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    setAnalyzing(true);
+    setAnalysisError(null);
     try {
-      const simulation = await simulate(actions);
-      setResult(simulation);
-      if (simulation.valid) {
-        const ai = await analyze(simulation);
-        setAnalysis(ai);
+      const response = await analyze(scenario.selectedActions, controller.signal);
+      if (isCurrent()) setAnalysis(response);
+    } catch {
+      if (isCurrent()) {
+        setAnalysis(fallbackAnalysis(scenario));
+        setAnalysisError(
+          "AI-анализ сейчас недоступен. Показаны сохранённые результаты и рекомендации симулятора.",
+        );
       }
     } finally {
-      setLoading(false);
+      clearTimeout(timeout);
+      if (isCurrent()) setAnalyzing(false);
     }
   }
 
+  async function runSimulation() {
+    if (!valid || simulationController.current) return;
+    const version = ++generation.current;
+    const controller = new AbortController();
+    simulationController.current = controller;
+    analysisController.current?.abort();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    const submitted = structuredClone(actions);
+    setLoading(true);
+    setResult(null);
+    setAnalysis(null);
+    setErrors([]);
+    setAnalysisError(null);
+    setAnalyzing(false);
+    try {
+      const response = await simulate(submitted, controller.signal);
+      if (version !== generation.current) return;
+      setResult(response);
+      setView("results");
+      setAnnouncement("Сценарий рассчитан. Результаты доступны.");
+      void requestAnalysis(response, version);
+    } catch (error) {
+      if (version === generation.current)
+        setErrors(
+          controller.signal.aborted
+            ? [
+                "Сервер не ответил за 20 секунд. Решения сохранены — попробуйте ещё раз.",
+              ]
+            : error instanceof ApiError
+              ? [error.message, ...error.issues]
+              : ["Не удалось выполнить симуляцию. Попробуйте ещё раз."],
+        );
+    } finally {
+      clearTimeout(timeout);
+      if (version === generation.current) {
+        simulationController.current = null;
+        setLoading(false);
+      }
+    }
+  }
+
+  function saveScenario(name: "A" | "B") {
+    if (!result) return;
+    const snapshot: SavedScenario = structuredClone({ result, actions, name });
+    if (name === "A") setScenarioA(snapshot);
+    else setScenarioB(snapshot);
+    setAnnouncement(
+      `Сценарий ${name} сохранён${(name === "A" && scenarioA) || (name === "B" && scenarioB) ? " заново" : ""}.`,
+    );
+  }
+
+  function restoreScenario(scenario: SavedScenario) {
+    changeActions(structuredClone(scenario.actions));
+    setDistrictChoices(
+      Object.fromEntries(
+        scenario.actions
+          .filter((action) => action.districtId)
+          .map((action) => [action.initiativeId, action.districtId!]),
+      ),
+    );
+    setView("plan");
+    setAnnouncement(
+      `Решения сценария ${scenario.name} восстановлены. Для новых результатов запустите симуляцию.`,
+    );
+  }
+
+  const beforeDistrict =
+    result?.districtsBefore.find(
+      (district) => district.id === focusedDistrict,
+    ) ?? districts.find((district) => district.id === focusedDistrict)!;
+  const afterDistrict = result?.districtsAfter.find(
+    (district) => district.id === focusedDistrict,
+  );
+  const criticalCount = analyticNumber(result, "criticalIssueCount");
+  const improvedCount = analyticNumber(result, "improvedDistrictCount");
+  const heading =
+    view === "plan"
+      ? "Пять решений. Один город."
+      : view === "results"
+        ? "Результат ваших решений"
+        : "Сравнение сценариев";
+
   return (
-    <main className="min-h-screen bg-panel text-ink">
-      <header className="border-b border-line bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-6">
-          <p className="text-sm font-semibold uppercase tracking-wide text-teal">Urban analytics platform</p>
-          <h1 className="mt-2 text-3xl font-semibold">Akim for 5 Hours</h1>
-          <p className="mt-2 max-w-3xl text-slate-600">
-            Select five city initiatives, validate the budget and constraints, then compare how the scenario changes district metrics and the Astana Quality of Life Score.
-          </p>
-        </div>
+    <div className="app-shell">
+      <a href="#workspace" className="skip-link">
+        Перейти к рабочей области
+      </a>
+      <header className="site-header">
+        <a className="brand" href="#">
+          <span className="brand-mark">A</span>
+          <span>
+            Akim <strong>for 5 Hours</strong>
+          </span>
+        </a>
+        <span className="header-subtitle">Лаборатория городских решений</span>
+        <span className="live-badge">
+          <i />
+          Синтетическая модель
+        </span>
       </header>
-
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6">
-        <section className="grid gap-4 md:grid-cols-5">
-          <KpiCard label="Current Score" value={result?.scoreAfter ?? result?.scoreBefore ?? 52.56} detail="Astana Quality of Life Score" />
-          <KpiCard label="Budget Used" value={usedBudget} detail="of 100 budget units" />
-          <KpiCard label="Budget Remaining" value={100 - usedBudget} detail="unused budget gives no bonus" />
-          <KpiCard label="Critical Issues" value={result?.analysisData?.criticalIssueCount ?? 2} detail="metrics below 40" />
-          <KpiCard label="Improved Districts" value={result?.analysisData?.improvedDistrictCount ?? 0} detail="after simulation" />
+      <main>
+        <section className="hero">
+          <div>
+            <span className="eyebrow">Астана · стратегический симулятор</span>
+            <h1>
+              Akim for <span>5 Hours</span>
+            </h1>
+            <p>
+              Каким будет ваш город? Распределите бюджет между пятью решениями и
+              сравните их влияние на жизнь районов.
+            </p>
+            <div className="hero-chips">
+              <span>5 районов</span>
+              <span>14 инициатив</span>
+              <span>{HORIZON_QUARTERS} кварталов</span>
+            </div>
+          </div>
+          <div className="hero-art" aria-hidden="true">
+            <span className="sun" />
+            <span className="building one" />
+            <span className="building two" />
+            <span className="tower" />
+            <span className="building three" />
+            <span className="building four" />
+            <span className="ground" />
+            <span className="art-caption">Будущее складывается из решений</span>
+          </div>
         </section>
-
-        <section className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          <aside className="rounded-lg border border-line bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Initiative Catalog</h2>
-              <span className="rounded-md bg-panel px-2 py-1 text-sm">{actions.length}/5</span>
-            </div>
-            <div className="mt-4 grid gap-3">
-              <input
-                className="rounded-md border border-line px-3 py-2"
-                placeholder="Search initiative"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <select className="rounded-md border border-line px-3 py-2" value={category} onChange={(event) => setCategory(event.target.value as Category | "all")}>
-                  <option value="all">All categories</option>
-                  {Object.entries(categoryLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-                <select className="rounded-md border border-line px-3 py-2" value={sort} onChange={(event) => setSort(event.target.value as "cost" | "category" | "lag")}>
-                  <option value="category">Sort by category</option>
-                  <option value="cost">Sort by cost</option>
-                  <option value="lag">Sort by lag</option>
-                </select>
-              </div>
-            </div>
-            <div className="mt-4 grid max-h-[760px] gap-3 overflow-auto pr-1">
-              {filteredInitiatives.map((initiative) => (
-                <InitiativeCard
-                  key={initiative.id}
-                  initiative={initiative}
-                  districts={districts}
-                  selectedAction={actions.find((action) => action.initiativeId === initiative.id)}
-                  onToggle={toggleInitiative}
-                  onDistrictChange={changeDistrict}
-                />
-              ))}
-            </div>
-          </aside>
-
-          <section className="grid gap-6">
-            <div className="rounded-lg border border-line bg-white p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">Selected Initiatives</h2>
-                  <p className="text-sm text-slate-600">Budget, validation, and simulation controls</p>
-                </div>
-                <button
-                  className="rounded-md bg-teal px-4 py-2 font-semibold text-white disabled:opacity-50"
-                  disabled={loading}
-                  onClick={runScenario}
-                >
-                  {loading ? "Running..." : "Run Simulation"}
-                </button>
-              </div>
-              <div className="mt-4 grid gap-2">
-                {actions.length === 0 && <p className="text-sm text-slate-600">No initiatives selected.</p>}
-                {actions.map((action) => {
-                  const initiative = initiatives.find((item) => item.id === action.initiativeId);
-                  const district = districts.find((item) => item.id === action.districtId);
-                  return initiative ? (
-                    <div key={initiative.id} className="flex items-center justify-between rounded-md bg-panel px-3 py-2 text-sm">
-                      <span>{initiative.id}. {initiative.name}</span>
-                      <span>{initiative.cost} · {district?.name ?? "город"}</span>
-                    </div>
-                  ) : null;
-                })}
-              </div>
-              {errors.length > 0 && (
-                <div className="mt-4 rounded-md border border-amber/40 bg-amber/10 p-3">
-                  <h3 className="font-semibold text-amber">Validation errors</h3>
-                  <ul className="mt-2 list-disc pl-5 text-sm text-amber">
-                    {errors.map((error) => <li key={error}>{error}</li>)}
-                  </ul>
-                </div>
+        <p className="data-notice">
+          ⓘ Все районы, показатели и бюджет в модели синтетические. Они не
+          отражают реальную статистику Астаны.
+        </p>
+        <section className="kpi-grid" aria-label="Основные показатели">
+          <article>
+            <span>Индекс качества жизни</span>
+            <strong>
+              {formatNumber(result?.scoreAfter ?? BASELINE_SCORE)}
+            </strong>
+            <small>
+              {result
+                ? `До: ${formatNumber(result.scoreBefore)} · ${signed(result.delta)}`
+                : "Исходный AQoLS по спецификации"}
+            </small>
+          </article>
+          <article>
+            <span>Бюджет использован</span>
+            <strong>
+              {spent}
+              <small> / {TOTAL_BUDGET}</small>
+            </strong>
+            <small>Фиксированный виртуальный бюджет</small>
+          </article>
+          <article>
+            <span>Бюджет остался</span>
+            <strong className={spent > TOTAL_BUDGET ? "negative" : "positive"}>
+              {TOTAL_BUDGET - spent}
+            </strong>
+            <small>{actions.length} из 5 решений выбрано</small>
+          </article>
+          <article>
+            <span>Критические показатели</span>
+            <strong>
+              {criticalCount === null ? "—" : formatNumber(criticalCount)}
+            </strong>
+            <small>
+              {criticalCount === null
+                ? "Ожидаем показатель от сервера"
+                : "По результатам симуляции"}
+            </small>
+          </article>
+          <article>
+            <span>Улучшенных районов</span>
+            <strong>
+              {improvedCount === null ? "—" : formatNumber(improvedCount)}
+            </strong>
+            <small>
+              {improvedCount === null
+                ? "Ожидаем показатель от сервера"
+                : "Из пяти районов города"}
+            </small>
+          </article>
+        </section>
+        <nav className="view-nav" aria-label="Разделы симулятора">
+          {(
+            [
+              { id: "plan", label: "01  Решения" },
+              { id: "results", label: "02  Аналитика" },
+              { id: "compare", label: "03  Сравнение A / B" },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-current={view === item.id ? "page" : undefined}
+              onClick={() => setView(item.id)}
+            >
+              {item.label}
+              {item.id === "compare" && (scenarioA || scenarioB) && (
+                <span className="nav-count">
+                  {Number(!!scenarioA) + Number(!!scenarioB)}
+                </span>
               )}
+            </button>
+          ))}
+        </nav>
+        <section id="workspace" className="workspace">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">
+                {view === "plan"
+                  ? "Ваши приоритеты"
+                  : view === "results"
+                    ? "Эффект на горизонте 8 кварталов"
+                    : "Два подхода к развитию"}
+              </span>
+              <h2 ref={viewHeading} tabIndex={-1}>
+                {heading}
+              </h2>
             </div>
-
-            {result && (
-              <>
-                <section className="grid gap-3 md:grid-cols-5">
-                  {result.districtsAfter.map((district) => (
-                    <DistrictCard
+            {view === "plan" && (
+              <button
+                type="button"
+                className="text-button"
+                disabled={!actions.length}
+                onClick={() => changeActions([])}
+              >
+                Сбросить решения
+              </button>
+            )}
+          </div>
+          <p className="sr-only" role="status">
+            {announcement}
+          </p>
+          {view === "plan" && (
+            <>
+              <div className="planning-grid">
+                <div className="catalog-column">
+                  <p className="section-intro">
+                    Выберите ровно 5 инициатив минимум из 3 категорий. Не больше
+                    2 решений в одной категории.
+                  </p>
+                  <div className="filters">
+                    <label className="search-field">
+                      <span className="sr-only">Поиск инициатив</span>
+                      <span aria-hidden="true">⌕</span>
+                      <input
+                        type="search"
+                        placeholder="Название, категория или M1…"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                      />
+                    </label>
+                    <label className="field-label">
+                      Охват
+                      <select
+                        aria-label="Охват"
+                        value={scope}
+                        onChange={(event) => setScope(event.target.value)}
+                      >
+                        <option value="all">Все инициативы</option>
+                        <option value="city">Весь город</option>
+                        <option value="district">Один район</option>
+                      </select>
+                    </label>
+                    <label className="field-label">
+                      Сортировка
+                      <select
+                        aria-label="Сортировка"
+                        value={sort}
+                        onChange={(event) => setSort(event.target.value)}
+                      >
+                        <option value="catalog">По каталогу</option>
+                        <option value="cost-asc">Сначала дешевле</option>
+                        <option value="cost-desc">Сначала дороже</option>
+                        <option value="lag">По сроку эффекта</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="category-filters" aria-label="Категории">
+                    <button
+                      type="button"
+                      aria-pressed={category === "all"}
+                      onClick={() => setCategory("all")}
+                    >
+                      Все <span>14</span>
+                    </button>
+                    {categories.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-pressed={category === item.id}
+                        onClick={() => setCategory(item.id)}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="catalog-count" role="status">
+                    Найдено инициатив: {filtered.length}
+                  </div>
+                  <div className="catalog-grid">
+                    {filtered.map((initiative) => (
+                      <CategoryCard
+                        key={initiative.id}
+                        initiative={initiative}
+                        selected={actions.some(
+                          (action) => action.initiativeId === initiative.id,
+                        )}
+                        full={actions.length >= 5}
+                        blockReason={selectionBlockReason(initiative)}
+                        districtId={districtChoices[initiative.id] ?? ""}
+                        onDistrict={(id) =>
+                          setDistrictChoices((previous) => ({
+                            ...previous,
+                            [initiative.id]: id,
+                          }))
+                        }
+                        onAdd={() => addAction(initiative.id)}
+                      />
+                    ))}
+                  </div>
+                  {!filtered.length && (
+                    <div className="empty-state">
+                      <h3>Ничего не найдено</h3>
+                      <p>Попробуйте другое название или снимите фильтры.</p>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => {
+                          setQuery("");
+                          setCategory("all");
+                          setScope("all");
+                        }}
+                      >
+                        Сбросить фильтры
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <aside
+                  className="selection-sidebar"
+                  aria-label="Выбранные решения"
+                >
+                  <div className="sticky-panel">
+                    <BudgetBar spent={spent} count={actions.length} />
+                    <section className="selection-box">
+                      <h3>
+                        Ваш сценарий <span>{actions.length} / 5</span>
+                      </h3>
+                      {actions.length ? (
+                        <ol className="selected-list">
+                          {actions.map((action) => {
+                            const initiative = initiativeById.get(
+                              action.initiativeId,
+                            )!;
+                            return (
+                              <li key={action.initiativeId}>
+                                <div className="selected-item-title">
+                                  <span className="mini-id">
+                                    {initiative.id}
+                                  </span>
+                                  <strong>{initiative.name}</strong>
+                                  <button
+                                    type="button"
+                                    className="remove-button"
+                                    aria-label={`Удалить ${initiative.id}`}
+                                    onClick={() =>
+                                      changeActions(
+                                        actions.filter(
+                                          (item) =>
+                                            item.initiativeId !==
+                                            action.initiativeId,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                                <div className="selected-item-meta">
+                                  <span>{initiative.cost} из бюджета</span>
+                                  {initiative.scope === "district" ? (
+                                    <label>
+                                      <span className="sr-only">
+                                        Район выбранной инициативы{" "}
+                                        {initiative.id}
+                                      </span>
+                                      <select
+                                        aria-label={`Район выбранной инициативы ${initiative.id}`}
+                                        value={action.districtId ?? ""}
+                                        onChange={(event) => {
+                                          const id = event.target
+                                            .value as DistrictId;
+                                          changeActions(
+                                            actions.map((item) =>
+                                              item.initiativeId ===
+                                              action.initiativeId
+                                                ? { ...item, districtId: id }
+                                                : item,
+                                            ),
+                                          );
+                                          setDistrictChoices((previous) => ({
+                                            ...previous,
+                                            [initiative.id]: id,
+                                          }));
+                                        }}
+                                      >
+                                        {districts.map((district) => (
+                                          <option
+                                            key={district.id}
+                                            value={district.id}
+                                          >
+                                            {district.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  ) : (
+                                    <span>Весь город</span>
+                                  )}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      ) : (
+                        <p className="selection-empty">
+                          Добавьте инициативы из каталога. Для районных проектов
+                          сначала выберите район.
+                        </p>
+                      )}
+                      <div className="validation-box" aria-live="polite">
+                        {issues.length ? (
+                          <ul>
+                            {issues.map((issue) => (
+                              <li key={issue}>{issue}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="positive">✓ Сценарий готов к расчёту</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="button primary run-button"
+                        disabled={!valid || loading}
+                        onClick={() => void runSimulation()}
+                      >
+                        {loading ? (
+                          <>
+                            <span className="spinner" />
+                            Рассчитываем…
+                          </>
+                        ) : (
+                          <>
+                            Запустить симуляцию{" "}
+                            <span aria-hidden="true">↗</span>
+                          </>
+                        )}
+                      </button>
+                      {errors.length > 0 && (
+                        <div className="notice error" role="alert">
+                          <strong>Не удалось рассчитать сценарий</strong>
+                          <ul>
+                            {errors.map((error, index) => (
+                              <li key={index}>{error}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <p className="helper">
+                        Симуляция считает показатели.
+                        <br />
+                        AI помогает понять результат.
+                      </p>
+                    </section>
+                    <section className="rules-note">
+                      <h4>Связи между решениями</h4>
+                      <p>M1 + M2, M10 + M12 и M5 + M6 дают синергии.</p>
+                      <p>
+                        M1 и M3 несовместимы. M4 + M7 и M5 + M13 нельзя выбрать
+                        в одном районе.
+                      </p>
+                    </section>
+                  </div>
+                </aside>
+              </div>
+              <section className="districts-section">
+                <div className="section-heading">
+                  <div>
+                    <span className="eyebrow">Отправная точка</span>
+                    <h2>Пять районов — разные потребности</h2>
+                  </div>
+                </div>
+                <div className="district-cards">
+                  {districts.map((district) => (
+                    <button
+                      type="button"
                       key={district.id}
-                      district={district}
-                      active={district.id === activeDistrictId}
-                      onOpen={() => setActiveDistrictId(district.id)}
-                    />
+                      className={`district-card ${focusedDistrict === district.id ? "active" : ""}`}
+                      aria-pressed={focusedDistrict === district.id}
+                      onClick={() => setFocusedDistrict(district.id)}
+                    >
+                      <span className="row">
+                        <strong>{district.name}</strong>
+                        <span>↗</span>
+                      </span>
+                      <span>
+                        {formatNumber(district.populationShare * 100)}%
+                        населения модели
+                      </span>
+                      <span className="district-preview">
+                        T1 <b>{district.metrics.T1}</b> · E1{" "}
+                        <b>{district.metrics.E1}</b> · S1{" "}
+                        <b>{district.metrics.S1}</b>
+                      </span>
+                    </button>
                   ))}
-                </section>
-
-                <Charts result={result} activeDistrict={activeDistrict} />
-
-                <section className="rounded-lg border border-line bg-white p-4">
-                  <h2 className="text-lg font-semibold">District Comparison Table</h2>
-                  <div className="mt-4 overflow-auto">
-                    <table className="min-w-full text-sm">
+                </div>
+                <DistrictDetail
+                  before={districts.find(
+                    (district) => district.id === focusedDistrict,
+                  )!}
+                />
+              </section>
+            </>
+          )}
+          {view === "results" &&
+            (result ? (
+              <>
+                <div className="result-top">
+                  <ScoreCard result={result} />
+                  <section className="panel save-panel">
+                    <span className="eyebrow">Сохраните подход</span>
+                    <h3>Какой сценарий лучше?</h3>
+                    <p>
+                      Сохраните результат, измените решения и сравните два
+                      варианта.
+                    </p>
+                    <div className="save-buttons">
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => saveScenario("A")}
+                      >
+                        {scenarioA ? "Перезаписать A" : "Сохранить A"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => saveScenario("B")}
+                      >
+                        {scenarioB ? "Перезаписать B" : "Сохранить B"}
+                      </button>
+                    </div>
+                    <p className="helper">
+                      Сценарии хранятся в этой вкладке до обновления страницы.
+                    </p>
+                  </section>
+                </div>
+                <ImpactChart result={result} actions={actions} />
+                <section className="panel">
+                  <div className="row">
+                    <h3>Рейтинг районов</h3>
+                    <span className="tag">После решений</span>
+                  </div>
+                  <div
+                    className="table-scroll"
+                    tabIndex={0}
+                    role="region"
+                    aria-label="Таблица рейтинга районов"
+                  >
+                    <table>
                       <thead>
-                        <tr className="border-b border-line text-left">
-                          <th className="py-2">District</th>
-                          <th>Score</th>
-                          {Object.keys(metricLabels).map((metric) => <th key={metric}>{metric}</th>)}
+                        <tr>
+                          <th scope="col">Место</th>
+                          <th scope="col">Район</th>
+                          <th scope="col">До</th>
+                          <th scope="col">После</th>
+                          <th scope="col">Изменение</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {result.districtsAfter.map((district) => (
-                          <tr key={district.id} className="border-b border-line">
-                            <td className="py-2 font-semibold">{district.name}</td>
-                            <td>{district.score}</td>
-                            {Object.keys(metricLabels).map((metric) => (
-                              <td key={metric}>{district.metrics[metric as keyof typeof district.metrics]}</td>
-                            ))}
-                          </tr>
-                        ))}
+                        {[...result.districtsAfter]
+                          .sort(
+                            (a, b) =>
+                              (b.score ?? -Infinity) - (a.score ?? -Infinity),
+                          )
+                          .map((district, index) => {
+                            const before = result.districtsBefore.find(
+                              (item) => item.id === district.id,
+                            );
+                            return (
+                              <tr key={district.id}>
+                                <td>
+                                  {district.score === undefined
+                                    ? "—"
+                                    : index + 1}
+                                </td>
+                                <th scope="row">{district.name}</th>
+                                <td>
+                                  {before?.score === undefined
+                                    ? "Нет в ответе"
+                                    : formatNumber(before.score)}
+                                </td>
+                                <td>
+                                  {district.score === undefined
+                                    ? "Нет в ответе"
+                                    : formatNumber(district.score)}
+                                </td>
+                                <td>
+                                  {district.score !== undefined &&
+                                  before?.score !== undefined
+                                    ? signed(district.score - before.score)
+                                    : "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
                 </section>
-
-                <section className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-lg border border-line bg-white p-4">
-                    <h2 className="text-lg font-semibold">Deterministic Recommendations</h2>
-                    <div className="mt-3 grid gap-3">
-                      {result.recommendations.map((recommendation) => (
-                        <article key={recommendation.title} className="rounded-md bg-panel p-3">
-                          <h3 className="font-semibold">{recommendation.title}</h3>
-                          <p className="mt-1 text-sm text-slate-600">{recommendation.rationale}</p>
-                          <p className="mt-2 text-xs font-semibold text-teal">{recommendation.initiativeIds.join(", ") || "No fitting initiative"}</p>
-                        </article>
+                <section className="districts-section">
+                  <label className="field-label district-selector">
+                    Подробный разбор района
+                    <select
+                      aria-label="Подробный разбор района"
+                      value={focusedDistrict}
+                      onChange={(event) =>
+                        setFocusedDistrict(event.target.value as DistrictId)
+                      }
+                    >
+                      {districts.map((district) => (
+                        <option key={district.id} value={district.id}>
+                          {district.name}
+                        </option>
                       ))}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-line bg-white p-4">
-                    <h2 className="text-lg font-semibold">AI Strategic Analysis</h2>
-                    {analysis ? (
-                      <div className="mt-3 grid gap-3 text-sm">
-                        <p>{analysis.executiveSummary}</p>
-                        <List title="Key Improvements" items={analysis.keyImprovements} />
-                        <List title="Risks" items={analysis.risks} />
-                        <List title="Tradeoffs" items={analysis.tradeoffs} />
-                        <List title="Strategic Recommendations" items={analysis.strategicRecommendations} />
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-sm text-slate-600">Run a valid simulation to generate analysis.</p>
-                    )}
+                    </select>
+                  </label>
+                  <DistrictDetail
+                    before={beforeDistrict}
+                    after={afterDistrict}
+                  />
+                </section>
+                <section className="panel">
+                  <h3>Решения в этом расчёте</h3>
+                  <div className="result-actions">
+                    {result.selectedActions.map((action) => {
+                      const initiative = initiativeById.get(
+                        action.initiativeId,
+                      )!;
+                      return (
+                        <article key={action.initiativeId}>
+                          <span className="eyebrow">
+                            {initiative.id} · {initiative.cost} из бюджета
+                          </span>
+                          <h4>{initiative.name}</h4>
+                          <p>
+                            {action.districtId
+                              ? districts.find(
+                                  (district) =>
+                                    district.id === action.districtId,
+                                )?.name
+                              : "Весь город"}{" "}
+                            · лаг {initiative.lag} кв.
+                          </p>
+                        </article>
+                      );
+                    })}
                   </div>
                 </section>
-
-                <section className="rounded-lg border border-line bg-white p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-lg font-semibold">Scenario Comparison</h2>
-                    <div className="flex gap-2">
-                      <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => setScenarioA(result)}>Save Scenario A</button>
-                      <button className="rounded-md border border-line px-3 py-2 text-sm" onClick={() => setScenarioB(result)}>Save Scenario B</button>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <ComparisonCard title="Scenario A" scenario={scenarioA} />
-                    <ComparisonCard title="Scenario B" scenario={scenarioB} />
-                    <div className="rounded-md bg-panel p-3">
-                      <div className="text-sm text-slate-500">Score Difference</div>
-                      <div className="mt-2 text-2xl font-semibold">
-                        {scenarioA?.scoreAfter !== null && scenarioA?.scoreAfter !== undefined && scenarioB?.scoreAfter !== null && scenarioB?.scoreAfter !== undefined
-                          ? (scenarioB.scoreAfter - scenarioA.scoreAfter).toFixed(2)
-                          : "—"}
-                      </div>
-                      <div className="mt-2 text-sm text-slate-600">Compare district, category, and budget allocation changes through the charts and selected actions.</div>
-                    </div>
-                  </div>
-                </section>
+                <AnalysisPanel
+                  analysis={analysis}
+                  loading={analyzing}
+                  error={analysisError}
+                  onRetry={() => {
+                    if (!analyzing)
+                      void requestAnalysis(result, generation.current);
+                  }}
+                />
               </>
-            )}
-          </section>
+            ) : (
+              <section className="empty-state">
+                <span className="empty-symbol">↗</span>
+                <h3>
+                  {loading
+                    ? "Симулятор рассчитывает сценарий"
+                    : "Посмотрите на эффект решений"}
+                </h3>
+                <p>
+                  {loading
+                    ? "Ожидаем ответ сервера. Это может занять несколько секунд."
+                    : "Выберите пять инициатив и запустите симуляцию. Здесь появятся показатели районов, графики и стратегический разбор."}
+                </p>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => setView("plan")}
+                >
+                  К выбору решений
+                </button>
+              </section>
+            ))}
+          {view === "compare" && (
+            <ScenarioComparison
+              a={scenarioA}
+              b={scenarioB}
+              onRestore={restoreScenario}
+            />
+          )}
         </section>
-      </div>
-    </main>
-  );
-}
-
-function validateDraft(actions: ActionInput[]): string[] {
-  const errors: string[] = [];
-  if (actions.length !== 5) {
-    errors.push("Нужно выбрать ровно 5 мероприятий.");
-  }
-  const usedBudget = actions.reduce((sum, action) => {
-    const initiative = initiatives.find((item) => item.id === action.initiativeId);
-    return sum + (initiative?.cost ?? 0);
-  }, 0);
-  if (usedBudget > 100) {
-    errors.push(`Бюджет превышен: ${usedBudget} из 100.`);
-  }
-
-  const duplicateIds = actions
-    .map((action) => action.initiativeId)
-    .filter((id, index, ids) => ids.indexOf(id) !== index);
-  for (const id of [...new Set(duplicateIds)]) {
-    errors.push(`Мероприятие ${id} выбрано больше одного раза.`);
-  }
-
-  const categoryCounts = new Map<Category, number>();
-  for (const action of actions) {
-    const initiative = initiatives.find((item) => item.id === action.initiativeId);
-    if (!initiative) {
-      errors.push(`Мероприятие ${action.initiativeId} не найдено.`);
-      continue;
-    }
-    categoryCounts.set(initiative.category, (categoryCounts.get(initiative.category) ?? 0) + 1);
-    if (initiative.scope === "district" && !action.districtId) {
-      errors.push(`Для мероприятия ${initiative.id} нужно выбрать район.`);
-    }
-    if (initiative.scope === "city" && action.districtId) {
-      errors.push(`Для городского мероприятия ${initiative.id} район указывать нельзя.`);
-    }
-  }
-
-  for (const [categoryName, count] of categoryCounts) {
-    if (count > 2) {
-      errors.push(`В направлении ${categoryName} выбрано больше 2 мероприятий.`);
-    }
-  }
-  if (actions.length > 0 && categoryCounts.size < 3) {
-    errors.push("Сценарий должен затрагивать минимум 3 направления.");
-  }
-
-  for (const conflict of conflicts) {
-    const [firstId, secondId] = conflict.initiativeIds;
-    const firstActions = actions.filter((action) => action.initiativeId === firstId);
-    const secondActions = actions.filter((action) => action.initiativeId === secondId);
-    if (firstActions.length === 0 || secondActions.length === 0) {
-      continue;
-    }
-    if (conflict.scope === "global") {
-      errors.push(conflict.message);
-    }
-    if (conflict.scope === "sameDistrict" && firstActions.some((first) => secondActions.some((second) => first.districtId === second.districtId))) {
-      errors.push(conflict.message);
-    }
-  }
-
-  return [...new Set(errors)];
-}
-
-function List({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div>
-      <h3 className="font-semibold">{title}</h3>
-      <ul className="mt-1 list-disc pl-5 text-slate-600">
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-    </div>
-  );
-}
-
-function ComparisonCard({ title, scenario }: { title: string; scenario: SimulationResult | null }) {
-  return (
-    <div className="rounded-md bg-panel p-3">
-      <div className="text-sm text-slate-500">{title}</div>
-      <div className="mt-2 text-2xl font-semibold">{scenario?.scoreAfter ?? "—"}</div>
-      <div className="mt-2 text-sm text-slate-600">Budget: {scenario?.analysisData?.budgetUsed ?? "—"}</div>
+      </main>
+      <footer className="site-footer">
+        <span>
+          Akim for 5 Hours <span> / HackAlem</span>
+        </span>
+        <span>Синтетические данные · Горизонт 8 кварталов</span>
+      </footer>
+      {view === "plan" && (
+        <div className="mobile-action-bar">
+          <span>
+            <strong>{spent} / 100</strong>
+            <small>{actions.length} из 5 решений</small>
+          </span>
+          <button
+            type="button"
+            className="button primary"
+            disabled={!valid || loading}
+            onClick={() => void runSimulation()}
+          >
+            {loading ? "Расчёт…" : "Рассчитать"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

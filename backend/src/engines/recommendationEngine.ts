@@ -1,6 +1,14 @@
 import type { AnalysisData, DataCatalog, DistrictResult, MetricCode, Recommendation, SelectedAction } from "../types/index.js";
 import { CATEGORY_METRICS } from "./scoringEngine.js";
 
+const CATEGORY_LABELS = {
+  transport: "транспорт",
+  ecology: "экологию",
+  social: "социальную сферу",
+  safety: "безопасность",
+  services: "городские сервисы"
+} as const;
+
 interface RecommendationInput {
   catalog: DataCatalog;
   selectedActions: SelectedAction[];
@@ -22,8 +30,8 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
   const weakestMetrics = CATEGORY_METRICS[input.analysisData.weakestCategory.category];
   recommendations.push({
     type: "weakestCategory",
-    title: `Поддержать направление ${input.analysisData.weakestCategory.category}`,
-    rationale: `Это самое слабое направление после расчета: ${input.analysisData.weakestCategory.score}.`,
+    title: `Поддержать ${CATEGORY_LABELS[input.analysisData.weakestCategory.category]}`,
+    rationale: `Это самое слабое направление после расчета: ${input.analysisData.weakestCategory.score}. Инициативы ниже - отдельные кандидаты, а не готовый совместный набор.`,
     initiativeIds: input.catalog.initiatives
       .filter((initiative) => !selectedIds.has(initiative.id))
       .filter((initiative) => weakestMetrics.some((metric) => initiative.effects[metric] !== undefined))
@@ -47,13 +55,9 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
   if (input.analysisData.budgetRemaining > 0) {
     recommendations.push({
       type: "unusedBudget",
-      title: "Использовать остаток бюджета точечно",
-      rationale: `Остаток бюджета: ${input.analysisData.budgetRemaining}. Он не дает бонуса сам по себе.`,
-      initiativeIds: input.catalog.initiatives
-        .filter((initiative) => !selectedIds.has(initiative.id))
-        .filter((initiative) => initiative.cost <= input.analysisData.budgetRemaining)
-        .slice(0, 3)
-        .map((initiative) => initiative.id)
+      title: "Остаток бюджета требует замены меры",
+      rationale: `Остаток бюджета: ${input.analysisData.budgetRemaining}. Он не дает бонуса, а добавить шестую меру нельзя: в сценарии всегда ровно 5 решений.`,
+      initiativeIds: []
     });
   }
 

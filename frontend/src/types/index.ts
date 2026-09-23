@@ -1,86 +1,54 @@
+export type Category =
+  "transport" | "ecology" | "social" | "safety" | "services";
 export type DistrictId = "yesil" | "almaty" | "saryarka" | "baikonur" | "nura";
-export type MetricCode = "T1" | "T2" | "E1" | "E2" | "S1" | "S2" | "B1" | "B2" | "C1" | "C2";
-export type Category = "transport" | "ecology" | "social" | "safety" | "services";
-export type InitiativeScope = "district" | "city";
-
-export interface District {
-  id: DistrictId;
-  name: string;
-  populationShare: number;
-  profile: string;
-  metrics: Record<MetricCode, number>;
-}
-
+export type Metric =
+  "T1" | "T2" | "E1" | "E2" | "S1" | "S2" | "B1" | "B2" | "C1" | "C2";
 export interface Initiative {
   id: string;
   category: Category;
   name: string;
-  scope: InitiativeScope;
+  scope: "district" | "city";
   cost: number;
   lag: number;
-  effects: Partial<Record<MetricCode, number>>;
+  effects: Partial<Record<Metric, number>>;
 }
-
-export interface ActionInput {
+export interface Action {
   initiativeId: string;
   districtId?: DistrictId;
 }
-
-export interface DistrictResult extends District {
-  score: number;
-  criticalIssues: MetricCode[];
-  metricDelta: Record<MetricCode, number>;
+export interface District {
+  id: DistrictId;
+  name: string;
+  populationShare: number;
+  metrics: Record<Metric, number>;
+  score?: number;
+  criticalIssues?: Metric[];
 }
-
-export interface CategoryScore {
-  category: Category;
-  score: number;
-}
-
-export interface AnalysisData {
-  weakestDistrict: {
-    districtId: DistrictId;
-    districtName: string;
-    populationShare: number;
-    score: number;
-    criticalIssues: MetricCode[];
-  };
-  weakestCategory: CategoryScore;
-  criticalIssueCount: number;
-  improvedDistrictCount: number;
-  budgetUsed: number;
-  budgetRemaining: number;
-}
-
-export interface Recommendation {
-  type: string;
-  title: string;
-  rationale: string;
-  initiativeIds: string[];
-}
-
+// Frontend projection of the new /simulate contract. All result numbers come
+// from the backend. Optional analytics stay absent when the server omits them.
 export interface SimulationResult {
-  valid: boolean;
+  valid: true;
   errors: string[];
   scoreBefore: number;
-  scoreAfter: number | null;
-  delta: number | null;
-  districtsBefore: DistrictResult[];
-  districtsAfter: DistrictResult[];
-  selectedActions: Array<{
-    initiative: Initiative;
-    districtId?: DistrictId;
-  }>;
-  analysisData: AnalysisData | null;
-  recommendations: Recommendation[];
+  scoreAfter: number;
+  delta: number;
+  districtsBefore: District[];
+  districtsAfter: District[];
+  selectedActions: Action[];
+  analysisData: Record<string, unknown>;
+  recommendations: unknown[];
 }
-
-export interface AiAnalysis {
+export interface Analysis {
   source: "openai" | "fallback";
-  executiveSummary: string;
-  keyImprovements: string[];
+  executive_summary: string;
+  key_improvements: string[];
   risks: string[];
   tradeoffs: string[];
-  strategicRecommendations: string[];
-  suggestedNextInvestments: string[];
+  strategic_recommendations: string[];
+  suggested_next_investments: string[];
+}
+export interface SavedScenario {
+  result: SimulationResult;
+  actions: Action[];
+  name: "A" | "B";
 }
