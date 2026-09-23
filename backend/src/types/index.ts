@@ -113,6 +113,14 @@ export interface SimulationResult {
   recommendations: Recommendation[];
 }
 
+export interface SingleReplacementAlternative {
+  actions: ActionInput[];
+  replacedAction: ActionInput;
+  replacementAction: ActionInput;
+  scoreAfter: number;
+  delta: number;
+}
+
 export interface DataCatalog {
   districts: District[];
   initiatives: Initiative[];

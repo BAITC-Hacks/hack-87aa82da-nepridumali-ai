@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadData } from "../data/loadData.js";
 import type { ActionInput, Category, DataCatalog, DistrictId, MetricCode } from "../types/index.js";
+import { findBestSingleReplacementAlternatives } from "./alternativeEngine.js";
 import { runSimulation } from "./simulationEngine.js";
 
 const catalog = loadData();
@@ -263,6 +264,46 @@ describe("simulation engine", () => {
         expect(knownInitiativeIds.has(initiativeId)).toBe(true);
       }
     }
+  });
+});
+
+describe("single replacement alternatives", () => {
+  it("keeps the documented control scenario at 52.56 to 56.54", () => {
+    const result = resultFor(demoActions);
+
+    expect(result.scoreBefore).toBe(52.56);
+    expect(result.scoreAfter).toBe(56.54);
+  });
+
+  it("returns up to three valid alternatives with calculated scores and deltas", () => {
+    const alternatives = findBestSingleReplacementAlternatives({ actions: demoActions }, catalog);
+
+    expect(alternatives).toHaveLength(3);
+    expect(alternatives.map((alternative) => alternative.scoreAfter)).toEqual(
+      [...alternatives.map((alternative) => alternative.scoreAfter)].sort((left, right) => right - left)
+    );
+
+    for (const alternative of alternatives) {
+      const scenario = resultFor(alternative.actions);
+      expect(scenario.valid).toBe(true);
+      expect(alternative.actions).toHaveLength(5);
+      expect(alternative.scoreAfter).toBe(scenario.scoreAfter);
+      expect(alternative.delta).toBe(scenario.delta);
+      expect(alternative.actions.filter((action) => action.initiativeId === alternative.replacementAction.initiativeId)).toHaveLength(1);
+      expect(alternative.actions).not.toContainEqual(alternative.replacedAction);
+    }
+  });
+
+  it("does not mutate the original selected actions", () => {
+    const originalActions = demoActions.map((action) => ({ ...action }));
+
+    findBestSingleReplacementAlternatives({ actions: demoActions }, catalog);
+
+    expect(demoActions).toEqual(originalActions);
+  });
+
+  it("returns no alternatives when the source scenario is invalid", () => {
+    expect(findBestSingleReplacementAlternatives({ actions: demoActions.slice(0, 4) }, catalog)).toEqual([]);
   });
 });
 
