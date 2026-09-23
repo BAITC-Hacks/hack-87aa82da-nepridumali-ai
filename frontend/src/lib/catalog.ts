@@ -3,7 +3,6 @@ import type { Category, District, Initiative, Metric } from "../types";
 // Display data transcribed from PROJECT_SPEC.md at simulation-core/95e841a.
 // This module contains no scoring, simulation, or realized-effect formulas.
 export const TOTAL_BUDGET = 100;
-export const BASELINE_SCORE = 52.56;
 export const HORIZON_QUARTERS = 8;
 export const categories: { id: Category; name: string }[] = [
   { id: "transport", name: "Транспорт" },

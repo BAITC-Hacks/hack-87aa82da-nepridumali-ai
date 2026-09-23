@@ -109,7 +109,12 @@ export function ComparisonChart({
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="table-scroll">
+          <div
+            className="table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label={title}
+          >
             <table>
               <caption className="sr-only">{title}</caption>
               <thead>
@@ -221,7 +226,7 @@ export function BudgetChart({ actions }: { actions: Action[] }) {
       <h3>Распределение бюджета</h3>
       <div className="chart donut" aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <PieChart>
+          <PieChart accessibilityLayer={false}>
             <Pie
               data={data.filter((row) => row.value > 0)}
               dataKey="value"
@@ -230,6 +235,7 @@ export function BudgetChart({ actions }: { actions: Action[] }) {
               outerRadius="80%"
               paddingAngle={3}
               isAnimationActive={false}
+              rootTabIndex={-1}
             >
               {data
                 .filter((row) => row.value > 0)
@@ -288,7 +294,11 @@ export function DistrictDetail({
         <div>
           <div className="chart radar" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <RadarChart data={data} outerRadius="65%">
+              <RadarChart
+                data={data}
+                outerRadius="65%"
+                accessibilityLayer={false}
+              >
                 <PolarGrid stroke="#d9e3dc" />
                 <PolarAngleAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9 }} />
@@ -330,7 +340,12 @@ export function DistrictDetail({
             </p>
           )}
         </div>
-        <div className="table-scroll">
+        <div
+          className="table-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label={`Метрики района ${before.name}`}
+        >
           <table>
             <caption className="sr-only">Метрики района {before.name}</caption>
             <thead>

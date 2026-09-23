@@ -154,16 +154,19 @@ async function post(
   try {
     data = await response.json();
   } catch {
-    throw new ApiError(
-      "Сервер вернул некорректный ответ. Попробуйте ещё раз позже.",
-    );
+    if (response.ok)
+      throw new ApiError(
+        "Сервер вернул нечитаемый ответ. Расчёт не показан. Повторите попытку; выбранные меры сохранятся.",
+      );
   }
   if (!response.ok) {
     const details = z.object({ errors: z.array(z.string()) }).safeParse(data);
     throw new ApiError(
-      response.status >= 500
-        ? "Сервис временно недоступен. Ваши решения сохранены — повторите запрос позже."
-        : "Сервер не принял запрос.",
+      response.status === 429
+        ? "Слишком много запросов. Подождите немного и повторите попытку."
+        : response.status >= 500
+          ? "Сервис временно недоступен. Повторите запрос через некоторое время."
+          : "Сервер не принял сценарий. Проверьте указанные причины и измените выбранные меры.",
       details.success ? details.data.errors : [],
     );
   }

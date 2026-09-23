@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Action } from "../types";
 import { initiatives, spentBudget } from "./catalog";
-import { validateActions } from "./validation";
+import {
+  selectionBlockReason,
+  selectionConflicts,
+  validateActions,
+} from "./validation";
 
 const valid: Action[] = [
   { initiativeId: "M1", districtId: "nura" },
@@ -103,5 +107,97 @@ describe("client selection feedback", () => {
         { initiativeId: "M12", districtId: "nura" },
       ]).join(" "),
     ).toContain("не привязана");
+  });
+});
+
+describe("editing a selected scenario", () => {
+  it("identifies both measures and the district after a district change", () => {
+    const next = valid.map((action) =>
+      action.initiativeId === "M4"
+        ? { ...action, districtId: "nura" as const }
+        : action,
+    );
+    expect(selectionConflicts(next)).toEqual([
+      {
+        initiativeIds: ["M4", "M7"],
+        message: expect.stringContaining("«Нура»"),
+      },
+    ]);
+    expect(selectionConflicts(valid)).toEqual([]);
+  });
+  it("checks replacements after removing the old measure and its cost", () => {
+    expect(
+      selectionBlockReason(
+        valid,
+        { initiativeId: "M3", districtId: "nura" },
+        "M1",
+      ),
+    ).toBeNull();
+    expect(spentBudget(valid)).toBe(83);
+    expect(valid[0].initiativeId).toBe("M1");
+  });
+  it("blocks replacements that exceed budget or repeat an existing measure", () => {
+    expect(
+      selectionBlockReason(
+        valid,
+        { initiativeId: "M3", districtId: "nura" },
+        "M10",
+      ),
+    ).toContain("Бюджет превышен");
+    expect(
+      selectionBlockReason(valid, { initiativeId: "M12" }, "M1"),
+    ).toContain("повторяться");
+  });
+  it("keeps the category limit, coverage and five-decision limit", () => {
+    const selection: Action[] = [
+      { initiativeId: "M1", districtId: "nura" },
+      { initiativeId: "M2" },
+      { initiativeId: "M4", districtId: "yesil" },
+      { initiativeId: "M10", districtId: "nura" },
+    ];
+    expect(
+      selectionBlockReason(selection, {
+        initiativeId: "M3",
+        districtId: "yesil",
+      }),
+    ).toContain("не больше 2");
+    expect(selectionBlockReason(valid, { initiativeId: "M14" })).toContain(
+      "5 решений",
+    );
+    const threeCategories: Action[] = [
+      ...selection.slice(0, 3),
+      { initiativeId: "M6" },
+      { initiativeId: "M12" },
+    ];
+    expect(
+      selectionBlockReason(
+        threeCategories,
+        { initiativeId: "M5", districtId: "nura" },
+        "M12",
+      ),
+    ).toContain("минимум 3 категории");
+  });
+  it("checks replacement district scope and same-district conflicts", () => {
+    expect(selectionBlockReason(valid, { initiativeId: "M5" }, "M4")).toContain(
+      "выберите район",
+    );
+    expect(
+      selectionBlockReason(
+        valid,
+        { initiativeId: "M14", districtId: "nura" },
+        "M12",
+      ),
+    ).toContain("не привязана");
+    const selection: Action[] = [
+      { initiativeId: "M5", districtId: "nura" },
+      ...valid.slice(1),
+    ];
+    expect(
+      selectionBlockReason(
+        selection,
+        { initiativeId: "M13", districtId: "nura" },
+        "M7",
+      ),
+    ).toContain("M5 и M13");
   });
 });
