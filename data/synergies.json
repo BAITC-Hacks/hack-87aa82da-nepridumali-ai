@@ -1,0 +1,23 @@
+[
+  {
+    "initiativeIds": ["M1", "M2"],
+    "districtSourceInitiativeId": "M1",
+    "bonus": {
+      "T1": 2
+    }
+  },
+  {
+    "initiativeIds": ["M10", "M12"],
+    "districtSourceInitiativeId": "M10",
+    "bonus": {
+      "B1": 2
+    }
+  },
+  {
+    "initiativeIds": ["M5", "M6"],
+    "districtSourceInitiativeId": "M5",
+    "bonus": {
+      "E2": 2
+    }
+  }
+]
