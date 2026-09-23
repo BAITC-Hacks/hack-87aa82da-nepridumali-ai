@@ -1,0 +1,17 @@
+[
+  {
+    "initiativeIds": ["M1", "M3"],
+    "scope": "global",
+    "message": "M1 и M3 нельзя выбирать вместе: либо BRT, либо ЛРТ."
+  },
+  {
+    "initiativeIds": ["M4", "M7"],
+    "scope": "sameDistrict",
+    "message": "M4 и M7 нельзя выбирать в одном районе: конфликт за участок."
+  },
+  {
+    "initiativeIds": ["M5", "M13"],
+    "scope": "sameDistrict",
+    "message": "M5 и M13 нельзя выбирать в одном районе: дублирование программы."
+  }
+]
