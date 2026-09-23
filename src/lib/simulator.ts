@@ -1,10 +1,11 @@
+import { z } from "zod";
 import { districts } from "../data/districts.js";
 import { initiatives } from "../data/initiatives.js";
 import type { Category, District, Initiative, ScenarioResult } from "../types/index.js";
 
-export const TOTAL_BUDGET_MLN_KZT = 1000;
+const TOTAL_BUDGET_MLN_KZT = 1000;
 
-export const CATEGORIES: Category[] = [
+const CATEGORIES: Category[] = [
   "transport",
   "greening",
   "social",
@@ -12,7 +13,7 @@ export const CATEGORIES: Category[] = [
   "services"
 ];
 
-export const SCORE_WEIGHTS: Record<Category, number> = {
+const SCORE_WEIGHTS: Record<Category, number> = {
   transport: 0.27,
   greening: 0.2,
   social: 0.22,
@@ -20,11 +21,12 @@ export const SCORE_WEIGHTS: Record<Category, number> = {
   services: 0.13
 };
 
+const selectionSchema = z.array(z.string()).length(CATEGORIES.length);
 const initiativeById = new Map(initiatives.map((initiative) => [initiative.id, initiative]));
 
-export function simulateScenario(selectedInitiativeIds: string[]): ScenarioResult {
-  const selectedInitiatives = selectedInitiativeIdsToInitiatives(selectedInitiativeIds);
-  const errors = validateSelection(selectedInitiativeIds, selectedInitiatives);
+export function runSimulation(selectedIds: string[]): ScenarioResult {
+  const selectedInitiatives = selectedIdsToInitiatives(selectedIds);
+  const errors = validateSelection(selectedIds, selectedInitiatives);
   const spentMlnKzt = sumSelectedCost(selectedInitiatives);
   const categoryScoresBefore = calculateCategoryScores(districts);
   const scoreBefore = calculateAqols(categoryScoresBefore);
@@ -48,50 +50,24 @@ export function simulateScenario(selectedInitiativeIds: string[]): ScenarioResul
   };
 }
 
-export function calculateCategoryScores(cityDistricts: District[]): Record<Category, number> {
-  const totalPopulation = cityDistricts.reduce((sum, district) => sum + district.population, 0);
-
-  return CATEGORIES.reduce<Record<Category, number>>((scores, category) => {
-    const weightedTotal = cityDistricts.reduce(
-      (sum, district) => sum + district.population * district.indicators[category],
-      0
-    );
-    scores[category] = roundToTwo(weightedTotal / totalPopulation);
-    return scores;
-  }, emptyCategoryScores());
-}
-
-export function calculateAqols(categoryScores: Record<Category, number>): number {
-  const baseScore = CATEGORIES.reduce(
-    (sum, category) => sum + categoryScores[category] * SCORE_WEIGHTS[category],
-    0
-  );
-  return roundToTwo(clamp(baseScore - calculateImbalancePenalty(categoryScores), 0, 100));
-}
-
-export function calculateImbalancePenalty(categoryScores: Record<Category, number>): number {
-  const scores = CATEGORIES.map((category) => categoryScores[category]);
-  return roundToTwo(0.15 * (Math.max(...scores) - Math.min(...scores)));
-}
-
-function validateSelection(selectedInitiativeIds: string[], selectedInitiatives: Initiative[]): string[] {
+function validateSelection(selectedIds: string[], selectedInitiatives: Initiative[]): string[] {
   const errors: string[] = [];
 
-  if (selectedInitiativeIds.length !== CATEGORIES.length) {
+  if (!selectionSchema.safeParse(selectedIds).success) {
     errors.push("Нужно выбрать ровно пять инициатив.");
   }
 
-  const unknownIds = selectedInitiativeIdsWithoutCatalogMatch(selectedInitiativeIds);
+  const unknownIds = selectedIds.filter((id) => !initiativeById.has(id));
   if (unknownIds.length > 0) {
     errors.push(`Неизвестные инициативы: ${unknownIds.join(", ")}.`);
   }
 
   for (const category of CATEGORIES) {
-    const count = selectedInitiatives.filter((initiative) => initiative.category === category).length;
-    if (count === 0) {
+    const selectedInCategory = selectedInitiatives.filter((initiative) => initiative.category === category);
+    if (selectedInCategory.length === 0) {
       errors.push(`Не выбрана инициатива в категории ${category}.`);
     }
-    if (count > 1) {
+    if (selectedInCategory.length > 1) {
       errors.push(`В категории ${category} выбрано больше одной инициативы.`);
     }
   }
@@ -102,6 +78,13 @@ function validateSelection(selectedInitiativeIds: string[], selectedInitiatives:
   }
 
   return errors;
+}
+
+function selectedIdsToInitiatives(selectedIds: string[]): Initiative[] {
+  return selectedIds.flatMap((id) => {
+    const initiative = initiativeById.get(id);
+    return initiative ? [initiative] : [];
+  });
 }
 
 function applyInitiatives(baseDistricts: District[], selectedInitiatives: Initiative[]): District[] {
@@ -124,15 +107,30 @@ function applyInitiatives(baseDistricts: District[], selectedInitiatives: Initia
   return updatedDistricts;
 }
 
-function selectedInitiativeIdsToInitiatives(selectedInitiativeIds: string[]): Initiative[] {
-  return selectedInitiativeIds.flatMap((id) => {
-    const initiative = initiativeById.get(id);
-    return initiative ? [initiative] : [];
-  });
+function calculateCategoryScores(cityDistricts: District[]): Record<Category, number> {
+  const totalPopulation = cityDistricts.reduce((sum, district) => sum + district.population, 0);
+
+  return CATEGORIES.reduce<Record<Category, number>>((scores, category) => {
+    const weightedTotal = cityDistricts.reduce(
+      (sum, district) => sum + district.population * district.indicators[category],
+      0
+    );
+    scores[category] = roundToTwo(weightedTotal / totalPopulation);
+    return scores;
+  }, emptyCategoryScores());
 }
 
-function selectedInitiativeIdsWithoutCatalogMatch(selectedInitiativeIds: string[]): string[] {
-  return selectedInitiativeIds.filter((id) => !initiativeById.has(id));
+function calculateAqols(categoryScores: Record<Category, number>): number {
+  const baseScore = CATEGORIES.reduce(
+    (sum, category) => sum + categoryScores[category] * SCORE_WEIGHTS[category],
+    0
+  );
+  return roundToTwo(clamp(baseScore - calculateImbalancePenalty(categoryScores), 0, 100));
+}
+
+function calculateImbalancePenalty(categoryScores: Record<Category, number>): number {
+  const scores = CATEGORIES.map((category) => categoryScores[category]);
+  return roundToTwo(0.15 * (Math.max(...scores) - Math.min(...scores)));
 }
 
 function sumSelectedCost(selectedInitiatives: Initiative[]): number {
