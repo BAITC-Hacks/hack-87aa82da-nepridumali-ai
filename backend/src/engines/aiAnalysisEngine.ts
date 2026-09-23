@@ -3,17 +3,8 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import type { SimulationResult } from "../types/index.js";
 
-export interface AiAnalysis {
-  source: "openai" | "fallback";
-  executiveSummary: string;
-  keyImprovements: string[];
-  risks: string[];
-  tradeoffs: string[];
-  strategicRecommendations: string[];
-  suggestedNextInvestments: string[];
-}
-
-const aiAnalysisSchema = z.object({
+export const aiAnalysisSchema = z.object({
+  source: z.enum(["openai", "fallback"]),
   executiveSummary: z.string(),
   keyImprovements: z.array(z.string()),
   risks: z.array(z.string()),
@@ -22,6 +13,8 @@ const aiAnalysisSchema = z.object({
   suggestedNextInvestments: z.array(z.string())
 });
 
+export type AiAnalysis = z.infer<typeof aiAnalysisSchema>;
+
 const ANALYST_INSTRUCTIONS = [
   "Ты - AI-аналитик городских решений для симулятора Аким на 5 часов.",
   "Отвечай только на русском языке и только по переданному результату детерминированного расчета.",
@@ -29,7 +22,7 @@ const ANALYST_INSTRUCTIONS = [
   "Инициативы из server recommendations - это отдельные кандидаты; не предлагай сочетать их без новой проверки валидатором.",
   "Объясняй конкретные сильные стороны, оставшиеся риски и компромиссы сценария.",
   "Если для рекомендации недостаточно фактов в JSON, верни пустой массив для этого раздела.",
-  "Не показывай ход внутренних рассуждений."
+  "Не показывай ход внутренних рассуждений и не приводи чисел, которых нет в исходных данных."
 ].join(" ");
 
 export async function generateAiAnalysis(result: SimulationResult): Promise<AiAnalysis> {
@@ -62,10 +55,17 @@ export async function generateAiAnalysis(result: SimulationResult): Promise<AiAn
     if (!parsed) {
       return fallbackAnalysis(result);
     }
-    return {
-      source: "openai",
-      ...parsed
-    };
+
+    const parsedAi = aiAnalysisSchema.safeParse({
+      ...parsed,
+      source: "openai"
+    });
+
+    if (!parsedAi.success) {
+      return fallbackAnalysis(result);
+    }
+
+    return parsedAi.data;
   } catch {
     return fallbackAnalysis(result);
   }
