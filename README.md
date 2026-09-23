@@ -1,103 +1,160 @@
 # Akim for 5 Hours
 
-AI City Management Simulator for the HackAlem hackathon case.
+**AI-симулятор городского управления для HackAlem.** Пользователь выступает в роли акима: выбирает пять городских инициатив в рамках фиксированного бюджета и получает прогноз их влияния на синтетические показатели районов и индекс качества жизни Астаны.
 
-## Overview
+## Зачем проект
 
-The app lets a user act as a city mayor, select exactly five initiatives within a 100-unit budget, and see how those decisions change district indicators and the Astana Quality of Life Score. The backend performs every numerical calculation deterministically. OpenAI is used only to explain already-calculated results.
+Городские решения затрагивают разные районы и сферы одновременно: транспорт, экологию, социальную инфраструктуру, безопасность и городские сервисы. На интуиции трудно сравнить варианты и заметить конфликт мер или перекос в распределении бюджета.
 
-## Architecture
+`Akim for 5 Hours` помогает участнику симулировать такой выбор в прозрачной модели. Решение рассчитано на демонстрацию для жюри HackAlem, а по сценарию использования — на специалистов, которым нужно быстро сравнить ограниченное число городских инициатив.
+
+Все районы, показатели и бюджет в модели синтетические. Это не реальная статистика Астаны и не инструмент для принятия фактических управленческих решений.
+
+## Что реализовано
+
+- Интерактивный каталог из 14 инициатив в пяти направлениях: транспорт, экология, социальная сфера, безопасность и сервисы.
+- Выбор района для районных инициатив, поиск, фильтрация и сортировка каталога.
+- Проверка сценария: ровно пять решений, бюджет 100, отсутствие повторов и конфликтов, ограничения по категориям и корректность области действия инициатив.
+- Детерминированная симуляция по пяти синтетическим районам и десяти метрикам с учётом лагов, синергий, ограничений значений и весов населения.
+- Расчёт Astana Quality of Life Score, изменений по районам, критических показателей и детерминированных рекомендаций.
+- Графики и карточки результатов, детализация района, а также сохранение и сравнение сценариев A и B в состоянии браузера.
+- Опциональный AI-анализ: OpenAI получает рассчитанный результат и объясняет его, не пересчитывая показатели.
+
+## Как работает решение
+
+1. Пользователь выбирает до пяти инициатив и, если необходимо, район их применения.
+2. Интерфейс сразу показывает ограничения выбора, а сервер повторно валидирует отправленный сценарий.
+3. Для валидного сценария backend применяет эффекты инициатив к синтетическим метрикам районов с учётом их лагов и синергий.
+4. Backend рассчитывает районные оценки, взвешенный городской показатель, число критических метрик и итоговый AQoLS.
+5. Frontend показывает результат, изменения по районам и рекомендации. Отдельно вызывается AI-анализ; при отсутствии ключа OpenAI или ошибке доступен fallback-анализ.
+
+## Технологии
+
+| Область | Используется |
+|---|---|
+| Frontend | React, Vite, TypeScript, Tailwind CSS |
+| Визуализация | Recharts |
+| Backend | Node.js, Express, TypeScript |
+| Валидация | Zod |
+| Тесты | Vitest |
+| AI | OpenAI API, по умолчанию модель `gpt-4o-mini` |
+| Хранение данных | Локальные JSON-файлы |
+
+База данных, аутентификация, пользовательские аккаунты и Docker в проекте не используются.
+
+## Архитектура
 
 ```text
-frontend/  React, Vite, TypeScript, Tailwind CSS, Recharts
-backend/   Node.js, Express, TypeScript
-data/      Local JSON datasets generated from the case documents
+frontend/ (React + Vite)
+  |
+  | POST /simulate, POST /analysis
+  v
+backend/ (Express)
+  |- routes/          HTTP-маршруты
+  |- engines/         валидация, симуляция, оценка, рекомендации, AI-анализ
+  |- data/loadData.ts загрузка каталога
+  `- types/           общие TypeScript-типы
+       |
+       v
+data/                 синтетические районы, инициативы, синергии, конфликты
 ```
 
-The backend separates routes from business logic:
+Числа для симуляции рассчитываются в детерминированных движках backend. Маршрут `/analysis` передаёт результат сценария в OpenAI для текстового объяснения; системная инструкция модели запрещает изменять или вычислять метрики и Score.
 
-- validation engine
-- simulation engine
-- scoring engine
-- recommendation engine
-- AI analysis engine
+Основные HTTP-маршруты:
 
-## Setup
+- `GET /health` — проверка доступности backend.
+- `POST /simulate` — валидация и расчёт сценария.
+- `POST /analysis` — AI-объяснение валидного сценария.
+
+## Установка и запуск
+
+### Требования
+
+- Node.js: для frontend заявлена версия `^20.19.0` или `>=22.12.0`.
+- npm.
+- Ключ OpenAI нужен только для AI-анализа; сама симуляция работает без него.
+
+### Шаги
 
 ```bash
+git clone https://github.com/BAITC-Hacks/hack-87aa82da-nepridumali-ai.git
+cd hack-87aa82da-nepridumali-ai
 npm install
-npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`.
-Backend runs on `http://localhost:4000`.
-
-## Environment Variables
-
-Backend:
+Создайте локальные файлы окружения на основе примеров:
 
 ```bash
-OPENAI_API_KEY=your_key_here
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+В `backend/.env` при необходимости укажите:
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
 PORT=4000
 FRONTEND_ORIGIN=http://localhost:5173
 ```
 
-Frontend:
+Для локального запуска укажите в `frontend/.env` адрес backend из примера:
 
-```bash
+```dotenv
 VITE_API_URL=http://localhost:4000
 ```
 
-## Local Development
+Запустите оба приложения:
 
 ```bash
 npm run dev
+```
+
+После запуска frontend доступен по адресу `http://localhost:5173`, backend — по адресу `http://localhost:4000`.
+
+## Как проверить решение
+
+1. Откройте `http://localhost:5173`.
+2. Выберите следующий сценарий:
+
+   - `M7` в районе `nura`;
+   - `M8` в районе `nura`;
+   - `M10` в районе `nura`;
+   - `M12` без района;
+   - `M5` в районе `saryarka`.
+
+3. Запустите симуляцию. Это валидный сценарий с бюджетом `95` из `100`.
+4. Проверьте, что в результатах видны Score до и после сценария, изменения показателей районов и рекомендации. Базовый Score модели равен `52.56`.
+5. Для проверки ограничений попробуйте выбрать меньше пяти мер, повторить инициативу или превысить бюджет: сервер вернёт ошибки валидации и не рассчитает итоговый Score.
+
+Проверка качества кода:
+
+```bash
 npm run test
+npm run typecheck
+npm run lint
 npm run build
 ```
 
-## API Documentation
+## Данные и интеграции
 
-### POST `/simulate`
+В каталоге `data/` находятся локальные исходные данные модели:
 
-Request:
+- `districts.json` — пять синтетических районов, доли населения и десять метрик;
+- `initiatives.json` — 14 инициатив, их стоимость, область действия, лаг и эффекты;
+- `synergies.json` — три правила синергии;
+- `conflicts.json` — правила несовместимости инициатив.
 
-```json
-{
-  "actions": [
-    { "initiativeId": "M7", "districtId": "nura" },
-    { "initiativeId": "M8", "districtId": "nura" },
-    { "initiativeId": "M10", "districtId": "nura" },
-    { "initiativeId": "M12" },
-    { "initiativeId": "M5", "districtId": "saryarka" }
-  ]
-}
-```
+Единственная внешняя интеграция — OpenAI API. Она необязательна: без `OPENAI_API_KEY` endpoint анализа возвращает fallback-текст на основе уже рассчитанных сервером данных. Для хранения или получения городских данных внешние API не используются.
 
-Response includes validation errors, score before, score after, delta, district changes, selected actions, analysis data, and deterministic recommendations.
+## Ограничения
 
-### POST `/analysis`
+- Все входные данные синтетические и локальные; обновления реальной городской статистики нет.
+- Нет базы данных, входа пользователей и постоянного хранения сценариев: сравнение A/B живёт только в состоянии frontend.
+- AI-анализ зависит от доступности OpenAI API и ключа `OPENAI_API_KEY`; при сбое используется fallback.
+- В репозитории нет подтверждённой публичной deployed-версии. Для frontend и backend предусмотрены переменные окружения для раздельного развёртывания, но действующий URL не указан.
 
-Request body is the successful `/simulate` response. The AI explains strengths, weaknesses, tradeoffs, risks, strategic recommendations, and suggested next investments without recalculating metrics.
+## Демо
 
-## Deployment
-
-### Vercel
-
-Deploy `frontend/` as the Vercel project root and set `VITE_API_URL` to the Render backend URL.
-
-### Render
-
-Deploy `backend/` as a Node service. Set `OPENAI_API_KEY`, `PORT`, and `FRONTEND_ORIGIN`.
-
-## Screenshots
-
-Add screenshots of the dashboard, simulation output, district detail view, and scenario comparison after deployment.
-
-## Judging Criteria Alignment
-
-- **Task fit:** exact district dataset, initiatives, validation rules, synergies, conflicts, and scoring formula from the case.
-- **Technical implementation:** modular deterministic backend and responsive analytics frontend.
-- **Reproducibility:** documented setup, API, and deployment.
-- **Practical value:** decision-support dashboard with scenario comparison and recommendations.
-- **Presentation quality:** KPI cards, charts, district analytics, and AI strategic explanation.
+Публичная ссылка на развёрнутую версию в текущем репозитории отсутствует.
