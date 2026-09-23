@@ -37,6 +37,18 @@ function payload() {
     recommendations: [
       { action: "Проверить сценарий M4", rationale: "Рекомендация сервера" },
     ],
+    alternatives: [
+      {
+        actions: [
+          { initiativeId: "M3", districtId: "nura" },
+          ...actions.slice(1),
+        ],
+        replacedAction: { initiativeId: "M1", districtId: "nura" },
+        replacementAction: { initiativeId: "M3", districtId: "nura" },
+        scoreAfter: 57.12,
+        delta: 4.56,
+      },
+    ],
   };
 }
 
@@ -49,6 +61,7 @@ describe("simulation response boundary", () => {
     expect(result.districtsAfter[0].metrics).toEqual(
       raw.districtsAfter[0].metrics,
     );
+    expect(result.alternatives).toEqual(raw.alternatives);
   });
   it("accepts reordered actions but rejects a result for another selection", () => {
     expect(

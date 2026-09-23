@@ -798,6 +798,68 @@ export default function App() {
                     })}
                   </div>
                 </section>
+                <section className="panel alternatives-panel">
+                  <div className="row">
+                    <div>
+                      <span className="eyebrow">Варианты для сравнения</span>
+                      <h3>Безопасные альтернативы</h3>
+                    </div>
+                    <span className="tag">Проверено симулятором</span>
+                  </div>
+                  <p className="muted">
+                    Каждая альтернатива заменяет ровно одну меру и проходит те же
+                    бюджетные и логические ограничения.
+                  </p>
+                  {result.alternatives.length ? (
+                    <ol className="alternatives-list">
+                      {result.alternatives.map((alternative, index) => {
+                        const replaced = initiativeById.get(
+                          alternative.replacedAction.initiativeId,
+                        );
+                        const replacement = initiativeById.get(
+                          alternative.replacementAction.initiativeId,
+                        );
+                        const district = alternative.replacementAction.districtId
+                          ? districts.find(
+                              (item) =>
+                                item.id === alternative.replacementAction.districtId,
+                            )?.name
+                          : "Весь город";
+                        return (
+                          <li key={`${alternative.replacedAction.initiativeId}-${alternative.replacementAction.initiativeId}-${alternative.replacementAction.districtId ?? "city"}`}>
+                            <div>
+                              <strong>
+                                {replaced?.id} → {replacement?.id}: {replacement?.name}
+                              </strong>
+                              <span>{district}</span>
+                            </div>
+                            <div className="alternative-score">
+                              <strong>{formatNumber(alternative.scoreAfter)}</strong>
+                              <span>{signed(alternative.delta)}</span>
+                            </div>
+                            <button
+                              type="button"
+                              className="button secondary"
+                              onClick={() => {
+                                changeActions(
+                                  structuredClone(alternative.actions),
+                                  `Альтернатива ${index + 1} загружена. Запустите симуляцию для подтверждения.`,
+                                );
+                                setView("plan");
+                              }}
+                            >
+                              Загрузить
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : (
+                    <p className="muted">
+                      Для этого сценария нет альтернатив с заменой одной меры.
+                    </p>
+                  )}
+                </section>
                 <AnalysisPanel
                   analysis={analysis}
                   loading={analyzing}

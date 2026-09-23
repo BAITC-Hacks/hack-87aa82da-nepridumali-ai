@@ -47,6 +47,7 @@ function result(actions: Action[]): SimulationResult {
     selectedActions: actions,
     analysisData: { criticalIssueCount: 2, improvedDistrictCount: 3 },
     recommendations: ["Рекомендация сервера"],
+    alternatives: [],
   };
 }
 type User = ReturnType<typeof userEvent.setup>;

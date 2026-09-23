@@ -104,6 +104,53 @@
 .category-metric-labels {
   margin-bottom: 14px;
 }
+.alternatives-panel .muted {
+  margin-top: 8px;
+}
+.alternatives-list {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 18px 0 0;
+  list-style: none;
+  counter-reset: alternatives;
+}
+.alternatives-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  counter-increment: alternatives;
+}
+.alternatives-list li > div:first-child {
+  min-width: 0;
+}
+.alternatives-list li > div:first-child::before {
+  content: counter(alternatives) ". ";
+  color: var(--green);
+}
+.alternatives-list strong,
+.alternatives-list span {
+  display: block;
+}
+.alternatives-list span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.alternative-score {
+  min-width: 62px;
+  text-align: right;
+}
+.alternative-score strong {
+  color: var(--green);
+}
+.alternatives-list .button {
+  min-height: 38px;
+}
 
 :root {
   font-family: Inter, Arial, Helvetica, sans-serif;

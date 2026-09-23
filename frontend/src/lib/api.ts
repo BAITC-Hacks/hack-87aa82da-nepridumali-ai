@@ -20,6 +20,17 @@ const actionSchema = z
       ? { initiativeId: action.initiative.id, districtId: action.districtId }
       : { initiativeId: action.initiative.id },
   );
+const inputActionSchema = z.object({
+  initiativeId: z.string(),
+  districtId: districtId.optional(),
+});
+const alternativeSchema = z.object({
+  actions: z.array(inputActionSchema),
+  replacedAction: inputActionSchema,
+  replacementAction: inputActionSchema,
+  scoreAfter: finite,
+  delta: finite,
+});
 const districtSchema = z.object({
   id: districtId,
   metrics: z.record(z.string(), finite.min(0).max(100)),
@@ -39,6 +50,7 @@ const resultSchema = z.object({
   selectedActions: z.array(actionSchema),
   analysisData: z.record(z.string(), z.unknown()),
   recommendations: z.array(z.unknown()),
+  alternatives: z.array(alternativeSchema),
 });
 const analysisSchema = z.object({
   source: z.enum(["openai", "fallback"]),

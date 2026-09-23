@@ -37,6 +37,14 @@ export interface SimulationResult {
   selectedActions: Action[];
   analysisData: Record<string, unknown>;
   recommendations: unknown[];
+  alternatives: SingleReplacementAlternative[];
+}
+export interface SingleReplacementAlternative {
+  actions: Action[];
+  replacedAction: Action;
+  replacementAction: Action;
+  scoreAfter: number;
+  delta: number;
 }
 export interface Analysis {
   source: "openai" | "fallback";
