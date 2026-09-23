@@ -56,7 +56,10 @@ export default function AnalysisPanel({
       )}
       {analysis?.source === "fallback" && (
         <div className="row fallback-status">
-          <span>Доступны серверные результаты без AI-генерации.</span>
+          <span role="status">
+            AI-разбор временно недоступен. Показан резервный разбор: оценка и
+            показатели рассчитаны симулятором и остаются действительными.
+          </span>
           <button
             type="button"
             className="text-button"

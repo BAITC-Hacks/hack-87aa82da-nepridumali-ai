@@ -1,5 +1,99 @@
 @import "tailwindcss";
 
+.initiative-block-reason {
+  color: #725925;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.selected-action-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.selected-action-controls .button {
+  min-height: 44px;
+  padding: 8px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.remove-action {
+  background: #fff;
+  color: #943e2c;
+  border-color: #e2c6bc;
+}
+.remove-action:hover {
+  background: #fff0ea;
+}
+.selected-list .has-conflict {
+  border-left: 3px solid #b34832;
+  padding-left: 10px;
+}
+.action-conflict {
+  color: #923f2c;
+  background: #fff1eb;
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 11px;
+  line-height: 1.65;
+  margin-top: 9px;
+}
+.selected-item-meta select[aria-invalid="true"] {
+  border: 2px solid #b34832;
+}
+.selected-item-meta select {
+  min-height: 44px;
+}
+.replacement-editor {
+  min-width: 0;
+  border: 1px solid #b9cdb5;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #f4f8ef;
+}
+.replacement-editor .field-label + .field-label {
+  margin-top: 12px;
+}
+.replacement-editor .field-label select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+.replacement-help {
+  color: #52664f;
+  font-size: 11px;
+  margin-top: 10px;
+}
+.api-error-panel {
+  margin-bottom: 20px;
+}
+.api-error-panel > p {
+  margin-top: 10px;
+}
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 15px;
+  margin-top: 12px;
+}
+.error-actions button,
+.fallback-status button {
+  min-height: 44px;
+}
+.mobile-selection-link {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  text-decoration: none;
+}
+#selected-scenario {
+  scroll-margin-top: 16px;
+}
+
 .category-impact {
   min-width: 0;
 }
@@ -18,8 +112,8 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #233b31;
-  --muted: #65776b;
-  --green: #237b65;
+  --muted: #536457;
+  --green: #1c7059;
   --line: #dfe7df;
   --surface: #fff;
 }
@@ -604,22 +698,22 @@ main {
 }
 .category-tag.ecology {
   background: #edf2e4;
-  color: #677c43;
+  color: #526735;
 }
 .category-tag.social {
   background: #faf0de;
-  color: #937237;
+  color: #785a25;
 }
 .category-tag.safety {
   background: #eeeaf5;
-  color: #786591;
+  color: #6e5989;
 }
 .category-tag.services {
   background: #e7f1ef;
-  color: #4b7b70;
+  color: #37695c;
 }
 .initiative-id {
-  color: #91a094;
+  color: var(--muted);
   font-size: 10px;
 }
 .initiative-card h3 {
@@ -679,7 +773,7 @@ main {
 .effect-note {
   font-size: 9px;
   line-height: 1.65;
-  color: #78877b;
+  color: var(--muted);
 }
 .initiative-actions {
   display: grid;
@@ -723,7 +817,7 @@ main {
 .budget-value span {
   font-size: 16px;
   font-weight: 400;
-  color: #70856b;
+  color: #52684c;
   letter-spacing: 0;
 }
 .budget-track {
@@ -744,7 +838,7 @@ main {
 .budget-meta {
   margin-top: 17px;
   font-size: 11px;
-  color: #687d60;
+  color: #52684c;
 }
 .budget-meta strong {
   color: #355d37;
@@ -855,7 +949,7 @@ main {
 }
 .rules-note {
   margin: 17px 6px;
-  color: #74826f;
+  color: var(--muted);
 }
 .rules-note h4 {
   font-size: 10px;
@@ -980,7 +1074,7 @@ td {
 }
 .metric-code {
   font-size: 9px;
-  color: #7f9280;
+  color: var(--muted);
   display: inline-block;
   min-width: 25px;
   margin-right: 5px;

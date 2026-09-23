@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { districts } from "./catalog";
-import { fallbackAnalysis, parseAnalysis, parseSimulation } from "./api";
+import {
+  analyze,
+  fallbackAnalysis,
+  parseAnalysis,
+  parseSimulation,
+  simulate,
+} from "./api";
 import type { Action } from "../types";
 
 const actions: Action[] = [
@@ -10,6 +16,7 @@ const actions: Action[] = [
   { initiativeId: "M10", districtId: "baikonur" },
   { initiativeId: "M12" },
 ];
+afterEach(() => vi.unstubAllGlobals());
 const selectedActions = (input: Action[]) =>
   input.map(({ initiativeId, ...rest }) => ({
     initiative: { id: initiativeId },
@@ -96,6 +103,77 @@ describe("simulation response boundary", () => {
         actions,
       ),
     ).toThrow("Сервер отклонил");
+  });
+});
+
+describe("HTTP error messages", () => {
+  it("treats an HTML error page as service unavailability, not a malformed successful result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("<html>Unavailable</html>", { status: 503 }),
+        ),
+    );
+    await expect(
+      simulate(actions, new AbortController().signal),
+    ).rejects.toThrow("Сервис временно недоступен");
+  });
+  it("preserves server validation reasons and explains rate limits", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ errors: ["Конфликт района"] }), {
+            status: 400,
+          }),
+        )
+        .mockResolvedValueOnce(new Response("busy", { status: 429 })),
+    );
+    await expect(
+      simulate(actions, new AbortController().signal),
+    ).rejects.toMatchObject({ issues: ["Конфликт района"] });
+    await expect(
+      simulate(actions, new AbortController().signal),
+    ).rejects.toThrow("Слишком много запросов");
+  });
+  it("distinguishes unreachable and unreadable successful responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(new Response("not json", { status: 200 })),
+    );
+    await expect(
+      simulate(actions, new AbortController().signal),
+    ).rejects.toThrow("Не удалось связаться");
+    await expect(
+      simulate(actions, new AbortController().signal),
+    ).rejects.toThrow("нечитаемый ответ");
+  });
+  it("sends only selected actions to the analysis endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            source: "fallback",
+            executiveSummary: "Разбор",
+            keyImprovements: [],
+            risks: [],
+            tradeoffs: [],
+            strategicRecommendations: [],
+            suggestedNextInvestments: [],
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await analyze(actions, new AbortController().signal);
+    expect(fetchMock.mock.calls[0][0]).toBe("/analysis");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ actions });
   });
 });
 

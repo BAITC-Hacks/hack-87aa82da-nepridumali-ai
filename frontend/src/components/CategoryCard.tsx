@@ -94,17 +94,29 @@ export default function CategoryCard({
         <button
           type="button"
           className={selected ? "button selected-button" : "button secondary"}
-          disabled={
-            selected || full || Boolean(blockReason)
+          disabled={selected || full || Boolean(blockReason)}
+          aria-label={
+            selected
+              ? `${initiative.id} уже в сценарии`
+              : `Добавить ${initiative.id}`
+          }
+          aria-describedby={
+            !selected && blockReason
+              ? `${initiative.id}-block-reason`
+              : undefined
           }
           onClick={onAdd}
         >
-          {selected
-            ? "✓ В сценарии"
-            : blockReason
-              ? blockReason
-              : `Добавить ${initiative.id}`}
+          {selected ? "✓ В сценарии" : `Добавить ${initiative.id}`}
         </button>
+        {!selected && blockReason && (
+          <p
+            className="initiative-block-reason"
+            id={`${initiative.id}-block-reason`}
+          >
+            {blockReason}
+          </p>
+        )}
       </div>
     </article>
   );
